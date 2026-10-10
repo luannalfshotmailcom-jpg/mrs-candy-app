@@ -9,7 +9,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Estilo CSS estritamente alinhado ao bege/creme claro
+# Estilo CSS bege/creme claro
 st.markdown("""
     <style>
     .stApp {
@@ -79,7 +79,49 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Lista base de meses
+# ID da Planilha do Google Drive
+SHEET_ID = "1lfxzdhzGCWuzWzJ2BU72bL6CmwLRxfK_dI2zvjFDEXE"
+
+def get_sheet_url(gid):
+    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid={gid}"
+
+# Funções de carregamento do Google Sheets
+@st.cache_data(ttl=10)
+def load_vendas():
+    try:
+        url = get_sheet_url("0")
+        df = pd.read_csv(url)
+        return df.to_dict('records')
+    except Exception:
+        return []
+
+@st.cache_data(ttl=10)
+def load_cardapio():
+    try:
+        url = get_sheet_url("1") # Ou índice correspondente à aba Cardapio
+        df = pd.read_csv(url)
+        return dict(zip(df['Doce'], df['Preco']))
+    except Exception:
+        return {
+            "Bolo de pote": 9.00,
+            "Brownie": 8.50,
+            "Cone": 8.00,
+            "Empadão": 12.00,
+            "Morango cravejado": 15.00,
+            "Pão de mel": 8.00,
+            "Tortinha": 10.00,
+            "Tortinha morango": 12.00
+        }
+
+@st.cache_data(ttl=10)
+def load_clientes():
+    try:
+        url = get_sheet_url("2")
+        df = pd.read_csv(url)
+        return df['Cliente'].dropna().tolist()
+    except Exception:
+        return ["Luanna", "Carlos", "Cliente Avulso"]
+
 MESES_PADRAO = [
     "Todos",
     "10/2026", "11/2026", "12/2026",
@@ -90,23 +132,14 @@ MESES_PADRAO = [
 if "lista_meses" not in st.session_state:
     st.session_state.lista_meses = MESES_PADRAO
 
-if "cardapio" not in st.session_state:
-    st.session_state.cardapio = {
-        "Bolo de pote": 9.00,
-        "Brownie": 8.50,
-        "Cone": 8.00,
-        "Empadão": 12.00,
-        "Morango cravejado": 15.00,
-        "Pão de mel": 8.00,
-        "Tortinha": 10.00,
-        "Tortinha morango": 12.00
-    }
-
 if "vendas" not in st.session_state:
-    st.session_state.vendas = []
+    st.session_state.vendas = load_vendas()
+
+if "cardapio" not in st.session_state:
+    st.session_state.cardapio = load_cardapio()
 
 if "clientes" not in st.session_state:
-    st.session_state.clientes = ["Luanna", "Carlos", "Cliente Avulso"]
+    st.session_state.clientes = load_clientes()
 
 if "carrinho" not in st.session_state:
     st.session_state.carrinho = []
@@ -117,6 +150,13 @@ st.markdown('<div class="brand-subtitle">POR LETÍCIA LUCAS</div>', unsafe_allow
 
 # Menu Lateral
 st.sidebar.title("📌 Menu")
+if st.sidebar.button("🔄 Atualizar Dados"):
+    st.cache_data.clear()
+    st.session_state.vendas = load_vendas()
+    st.session_state.cardapio = load_cardapio()
+    st.session_state.clientes = load_clientes()
+    st.rerun()
+
 pagina = st.sidebar.radio("Navegar", [
     "📊 Visão Geral", 
     "➕ Registrar Venda", 
@@ -136,17 +176,21 @@ if pagina == "📊 Visão Geral":
     
     if len(st.session_state.vendas) > 0:
         df_v = pd.DataFrame(st.session_state.vendas)
-        df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
-        df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
-        
-        if mes_selecionado != "Todos":
-            df_filtrado = df_v[df_v["Ano_Mes"] == mes_selecionado]
-        else:
-            df_filtrado = df_v
+        if "Data" in df_v.columns:
+            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
+            df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
             
-        tot_vendas = df_filtrado["Total"].sum() if not df_filtrado.empty else 0.0
-        tot_recebido = df_filtrado["Pago"].sum() if not df_filtrado.empty else 0.0
-        tot_pendente = df_filtrado["Pendente"].sum() if not df_filtrado.empty else 0.0
+            if mes_selecionado != "Todos":
+                df_filtrado = df_v[df_v["Ano_Mes"] == mes_selecionado]
+            else:
+                df_filtrado = df_v
+                
+            tot_vendas = df_filtrado["Total"].sum() if not df_filtrado.empty and "Total" in df_filtrado else 0.0
+            tot_recebido = df_filtrado["Pago"].sum() if not df_filtrado.empty and "Pago" in df_filtrado else 0.0
+            tot_pendente = df_filtrado["Pendente"].sum() if not df_filtrado.empty and "Pendente" in df_filtrado else 0.0
+        else:
+            df_filtrado = pd.DataFrame()
+            tot_vendas = tot_recebido = tot_pendente = 0.0
     else:
         df_filtrado = pd.DataFrame()
         tot_vendas = tot_recebido = tot_pendente = 0.0
@@ -253,7 +297,7 @@ elif pagina == "➕ Registrar Venda":
 elif pagina == "💰 Cobranças (Fiado)":
     st.subheader("💰 Clientes com Fiado Pendente")
     
-    pendentes = [v for v in st.session_state.vendas if v["Pendente"] > 0]
+    pendentes = [v for v in st.session_state.vendas if v.get("Pendente", 0) > 0]
     
     if len(pendentes) == 0:
         st.success("🎉 Nenhum valor pendente de cobrança!")
@@ -262,24 +306,24 @@ elif pagina == "💰 Cobranças (Fiado)":
             with st.container():
                 st.markdown(f"""
                     <div style="background-color:#F8F3E6; padding:15px; border-radius:8px; border:1px solid #C5A86D; border-left:5px solid #B71C1C; margin-bottom:12px;">
-                        <h4 style="margin:0; color:#2A1B12;">👤 {v['Cliente']}</h4>
-                        <p style="margin:4px 0; color:#333;"><b>Data:</b> {v['Data']} | <b>Itens:</b> {v['Doces']}</p>
-                        <p style="margin:0; color:#333;"><b>Total do Pedido:</b> R$ {v['Total']:.2f} | <b>Pago:</b> R$ {v['Pago']:.2f}</p>
-                        <h3 style="margin:5px 0; color:#B71C1C !important;">Falta Pagar: R$ {v['Pendente']:.2f}</h3>
+                        <h4 style="margin:0; color:#2A1B12;">👤 {v.get('Cliente', '')}</h4>
+                        <p style="margin:4px 0; color:#333;"><b>Data:</b> {v.get('Data', '')} | <b>Itens:</b> {v.get('Doces', '')}</p>
+                        <p style="margin:0; color:#333;"><b>Total do Pedido:</b> R$ {v.get('Total', 0):.2f} | <b>Pago:</b> R$ {v.get('Pago', 0):.2f}</p>
+                        <h3 style="margin:5px 0; color:#B71C1C !important;">Falta Pagar: R$ {v.get('Pendente', 0):.2f}</h3>
                     </div>
                 """, unsafe_allow_html=True)
                 
                 c_baixa1, c_baixa2 = st.columns(2)
                 with c_baixa1:
-                    if st.button(f"✅ Quitar Tudo (R$ {v['Pendente']:.2f})", key=f"pago_{v['ID']}"):
+                    if st.button(f"✅ Quitar Tudo", key=f"pago_{v.get('ID')}"):
                         v["Pago"] += v["Pendente"]
                         v["Pendente"] = 0.0
                         v["Status"] = "Pago"
-                        st.success(f"Dívida de {v['Cliente']} quitada!")
+                        st.success(f"Dívida quitada!")
                         st.rerun()
                 with c_baixa2:
-                    val_abat = st.number_input("Abater parte (R$)", min_value=0.0, max_value=float(v["Pendente"]), key=f"val_{v['ID']}")
-                    if st.button("💵 Abater", key=f"parc_{v['ID']}"):
+                    val_abat = st.number_input("Abater parte (R$)", min_value=0.0, max_value=float(v.get("Pendente", 0)), key=f"val_{v.get('ID')}")
+                    if st.button("💵 Abater", key=f"parc_{v.get('ID')}"):
                         if val_abat > 0:
                             v["Pago"] += val_abat
                             v["Pendente"] -= val_abat
@@ -297,30 +341,34 @@ elif pagina == "📈 Resultado Mensal":
     
     if len(st.session_state.vendas) > 0:
         df_v = pd.DataFrame(st.session_state.vendas)
-        df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
-        df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
-        
-        df_mes = df_v[df_v["Ano_Mes"] == mes_foco]
-        
-        if not df_mes.empty:
-            tot_faturamento = df_mes["Total"].sum()
-            tot_pago = df_mes["Pago"].sum()
-            tot_fiado = df_mes["Pendente"].sum()
-            qtd_pedidos = len(df_mes)
+        if "Data" in df_v.columns:
+            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
+            df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
             
-            c1, c2 = st.columns(2)
-            c1.markdown(f'<div class="metric-card"><div class="metric-title">Faturamento Total</div><div class="metric-value">R$ {tot_faturamento:,.2f}</div></div>', unsafe_allow_html=True)
-            c2.markdown(f'<div class="metric-card"><div class="metric-title">Nº de Pedidos</div><div class="metric-value">{qtd_pedidos}</div></div>', unsafe_allow_html=True)
+            df_mes = df_v[df_v["Ano_Mes"] == mes_foco]
             
-            c3, c4 = st.columns(2)
-            c3.markdown(f'<div class="metric-card"><div class="metric-title">Valor Recebido</div><div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_pago:,.2f}</div></div>', unsafe_allow_html=True)
-            c4.markdown(f'<div class="metric-card"><div class="metric-title">Fiado Pendente</div><div class="metric-value" style="color:#B71C1C !important;">R$ {tot_fiado:,.2f}</div></div>', unsafe_allow_html=True)
-            
-            st.markdown("---")
-            st.write(f"### Pedidos do Mês de {mes_foco}")
-            st.dataframe(df_mes[["ID", "Data", "Cliente", "Doces", "Total", "Status"]], use_container_width=True, hide_index=True)
+            if not df_mes.empty:
+                tot_faturamento = df_mes["Total"].sum()
+                tot_pago = df_mes["Pago"].sum()
+                tot_fiado = df_mes["Pendente"].sum()
+                qtd_pedidos = len(df_mes)
+                
+                c1, c2 = st.columns(2)
+                c1.markdown(f'<div class="metric-card"><div class="metric-title">Faturamento Total</div><div class="metric-value">R$ {tot_faturamento:,.2f}</div></div>', unsafe_allow_html=True)
+                c2.markdown(f'<div class="metric-card"><div class="metric-title">Nº de Pedidos</div><div class="metric-value">{qtd_pedidos}</div></div>', unsafe_allow_html=True)
+                
+                c3, c4 = st.columns(2)
+                c3.markdown(f'<div class="metric-card"><div class="metric-title">Valor Recebido</div><div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_pago:,.2f}</div></div>', unsafe_allow_html=True)
+                c4.markdown(f'<div class="metric-card"><div class="metric-title">Fiado Pendente</div><div class="metric-value" style="color:#B71C1C !important;">R$ {tot_fiado:,.2f}</div></div>', unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.write(f"### Pedidos do Mês de {mes_foco}")
+                cols = [c for c in ["ID", "Data", "Cliente", "Doces", "Total", "Status"] if c in df_mes.columns]
+                st.dataframe(df_mes[cols], use_container_width=True, hide_index=True)
+            else:
+                st.info(f"Nenhuma venda registrada no mês de {mes_foco}.")
         else:
-            st.info(f"Nenhuma venda registrada no mês de {mes_foco}.")
+            st.info("Formato de dados sem campo de Data.")
     else:
         st.info("Nenhuma venda cadastrada no sistema ainda.")
 
@@ -333,39 +381,42 @@ elif pagina == "📅 Resultado Anual":
     
     if len(st.session_state.vendas) > 0:
         df_v = pd.DataFrame(st.session_state.vendas)
-        df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
-        df_v["Ano"] = df_v["Data_DT"].dt.strftime("%Y")
-        df_v["Mês"] = df_v["Data_DT"].dt.strftime("%m/%Y")
-        
-        df_ano = df_v[df_v["Ano"] == ano_foco]
-        
-        if not df_ano.empty:
-            tot_ano_vendas = df_ano["Total"].sum()
-            tot_ano_pago = df_ano["Pago"].sum()
-            tot_ano_fiado = df_ano["Pendente"].sum()
+        if "Data" in df_v.columns:
+            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
+            df_v["Ano"] = df_v["Data_DT"].dt.strftime("%Y")
+            df_v["Mês"] = df_v["Data_DT"].dt.strftime("%m/%Y")
             
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">Faturamento Anual ({ano_foco})</div>
-                    <div class="metric-value">R$ {tot_ano_vendas:,.2f}</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-title">Total Recebido no Ano</div>
-                    <div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_ano_pago:,.2f}</div>
-                </div>
-                <div class="metric-card">
-                    <div class="metric-title">Total em Fiado no Ano</div>
-                    <div class="metric-value" style="color:#B71C1C !important;">R$ {tot_ano_fiado:,.2f}</div>
-                </div>
-            """, unsafe_allow_html=True)
+            df_ano = df_v[df_v["Ano"] == ano_foco]
             
-            st.markdown("---")
-            st.write(f"### Comparativo Mês a Mês ({ano_foco})")
-            resumo_mensal = df_ano.groupby("Mês")[["Total", "Pago", "Pendente"]].sum().reset_index()
-            resumo_mensal.columns = ["Mês", "Faturamento Total (R$)", "Recebido (R$)", "Fiado (R$)"]
-            st.dataframe(resumo_mensal, use_container_width=True, hide_index=True)
+            if not df_ano.empty:
+                tot_ano_vendas = df_ano["Total"].sum()
+                tot_ano_pago = df_ano["Pago"].sum()
+                tot_ano_fiado = df_ano["Pendente"].sum()
+                
+                st.markdown(f"""
+                    <div class="metric-card">
+                        <div class="metric-title">Faturamento Anual ({ano_foco})</div>
+                        <div class="metric-value">R$ {tot_ano_vendas:,.2f}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Total Recebido no Ano</div>
+                        <div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_ano_pago:,.2f}</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-title">Total em Fiado no Ano</div>
+                        <div class="metric-value" style="color:#B71C1C !important;">R$ {tot_ano_fiado:,.2f}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.write(f"### Comparativo Mês a Mês ({ano_foco})")
+                resumo_mensal = df_ano.groupby("Mês")[["Total", "Pago", "Pendente"]].sum().reset_index()
+                resumo_mensal.columns = ["Mês", "Faturamento Total (R$)", "Recebido (R$)", "Fiado (R$)"]
+                st.dataframe(resumo_mensal, use_container_width=True, hide_index=True)
+            else:
+                st.info(f"Nenhuma venda registrada no ano de {ano_foco}.")
         else:
-            st.info(f"Nenhuma venda registrada no ano de {ano_foco}.")
+            st.info("Dados sem campo de Data.")
     else:
         st.info("Nenhuma venda cadastrada no sistema ainda.")
 
