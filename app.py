@@ -77,6 +77,13 @@ st.markdown("""
         font-size: 26px;
         font-weight: bold;
     }
+    .venda-card {
+        background-color: #F8F3E6;
+        border: 1px solid #C5A86D;
+        border-radius: 10px;
+        padding: 12px 15px;
+        margin-bottom: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -184,26 +191,31 @@ pagina = st.sidebar.radio("Navegar", [
     "👥 Clientes"
 ])
 
-# 1. VISÃO GERAL
+# 1. VISÃO GERAL (COM EXCLUSÃO FÁCIL DE VENDAS)
 if pagina == "📊 Visão Geral":
     st.subheader("📊 Controle Geral de Vendas")
     mes_sel = st.selectbox("📅 Selecione o Mês", st.session_state.lista_meses)
     
+    ws_vendas = get_worksheet("Vendas")
+
     if len(st.session_state.vendas) > 0:
-        df_v = pd.DataFrame(st.session_state.vendas)
-        if "Data" in df_v.columns:
-            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
-            df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
-            df_f = df_v[df_v["Ano_Mes"] == mes_sel] if mes_sel != "Todos" else df_v
-            
-            tot = df_f["Total"].sum() if "Total" in df_f else 0.0
-            pend = df_f["Pendente"].sum() if "Pendente" in df_f else 0.0
-            rec = tot - pend
-        else:
-            df_f = pd.DataFrame()
-            tot = rec = pend = 0.0
+        vendas_filtradas = []
+        for v in st.session_state.vendas:
+            data_str = str(v.get("Data", ""))
+            try:
+                dt_obj = pd.to_datetime(data_str, format="%d/%m/%Y", errors="coerce")
+                ano_mes = dt_obj.strftime("%m/%Y") if pd.notnull(dt_obj) else "Outros"
+            except Exception:
+                ano_mes = "Outros"
+                
+            if mes_sel == "Todos" or ano_mes == mes_sel:
+                vendas_filtradas.append(v)
+
+        tot = sum(float(v.get("Total", 0)) for v in vendas_filtradas)
+        pend = sum(float(v.get("Pendente", 0)) for v in vendas_filtradas)
+        rec = tot - pend
     else:
-        df_f = pd.DataFrame()
+        vendas_filtradas = []
         tot = rec = pend = 0.0
 
     st.markdown(f"""
@@ -212,11 +224,47 @@ if pagina == "📊 Visão Geral":
         <div class="metric-card"><div class="metric-title">Pendente (Fiado)</div><div class="metric-value" style="color:#B71C1C !important;">R$ {pend:,.2f}</div></div>
     """, unsafe_allow_html=True)
 
-    if not df_f.empty:
-        cols = [c for c in ["ID", "Data", "Cliente", "Doces", "Total", "Pendente", "Status"] if c in df_f.columns]
-        st.dataframe(df_f[cols], use_container_width=True, hide_index=True)
+    st.markdown("---")
+    st.subheader("📋 Histórico de Vendas Registradas")
+
+    if vendas_filtradas:
+        for v in vendas_filtradas:
+            v_id = v.get("ID")
+            v_data = v.get("Data", "")
+            v_cli = v.get("Cliente", "")
+            v_doces = v.get("Doces", "")
+            v_tot = float(v.get("Total", 0))
+            v_pend = float(v.get("Pendente", 0))
+            v_status = v.get("Status", "Pago")
+
+            c_info, c_del = st.columns([5, 1])
+            with c_info:
+                st.markdown(f"""
+                    <div class="venda-card">
+                        <b>Data:</b> {v_data} | <b>Cliente:</b> {v_cli}<br>
+                        <b>Itens:</b> {v_doces}<br>
+                        <b>Total:</b> R$ {v_tot:.2f} | <b>Status:</b> {v_status} (Pendente: R$ {v_pend:.2f})
+                    </div>
+                """, unsafe_allow_html=True)
+            with c_del:
+                if st.button("🗑️", key=f"del_venda_{v_id}"):
+                    # Remover do session_state
+                    st.session_state.vendas = [x for x in st.session_state.vendas if str(x.get("ID")) != str(v_id)]
+                    
+                    # Remover da Planilha do Google Drive
+                    if ws_vendas:
+                        try:
+                            records = ws_vendas.get_all_records()
+                            for idx, row in enumerate(records, start=2):
+                                if str(row.get("ID")) == str(v_id):
+                                    ws_vendas.delete_rows(idx)
+                                    break
+                        except Exception:
+                            pass
+                    st.success("Venda excluída da planilha com sucesso!")
+                    st.rerun()
     else:
-        st.info("Nenhuma venda no período.")
+        st.info("Nenhuma venda registrada no período selecionado.")
 
 # 2. REGISTRAR VENDA
 elif pagina == "➕ Registrar Venda":
@@ -248,7 +296,7 @@ elif pagina == "➕ Registrar Venda":
             c1.write(f"**{item['Doce']}**")
             c2.write(f"x{item['Qtd']}")
             c3.write(f"R$ {item['Subtotal']:.2f}")
-            if c4.button("🗑️", key=f"del_{idx}"):
+            if c4.button("🗑️", key=f"del_item_{idx}"):
                 st.session_state.carrinho.pop(idx)
                 st.rerun()
 
@@ -299,7 +347,7 @@ elif pagina == "👥 Clientes":
     for c in st.session_state.clientes:
         st.write(f"• {c}")
 
-# 4. GERENCIAR CARDÁPIO (EDIÇÃO E EXCLUSÃO FÁCIL)
+# 4. GERENCIAR CARDÁPIO
 elif pagina == "🍬 Gerenciar Cardápio":
     st.subheader("🍬 Cardápio e Preços Cadastrados")
     st.write("Altere os preços diretamente ou clique na lixeira 🗑️ para remover um doce.")
