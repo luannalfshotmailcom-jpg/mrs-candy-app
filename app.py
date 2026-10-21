@@ -379,4 +379,184 @@ elif pagina == "💰 Cobranças (Fiado)":
                     <b>Total Pedido: R$ {v_tot:.2f}</b><br>
                     <h4 style="color:#B71C1C !important; margin: 4px 0;">Falta Pagar: R$ {v_pend:.2f}</h4>
                 </div>
-            """, unsafe_allow
+            """, unsafe_allow_html=True)
+            
+            if st.button("✅ Quitar Tudo", key=f"quitar_{v_id}"):
+                v["Pendente"] = 0.0
+                v["Status"] = "Pago"
+                if ws_vendas:
+                    try:
+                        records = ws_vendas.get_all_records()
+                        for idx, row in enumerate(records, start=2):
+                            if str(row.get("ID")) == str(v_id):
+                                ws_vendas.update_cell(idx, 6, 0.0)
+                                ws_vendas.update_cell(idx, 7, "Pago")
+                                break
+                    except Exception:
+                        pass
+                st.success("Dívida quitada!")
+                st.rerun()
+
+# 4. RESULTADO MENSAL
+elif pagina == "📈 Resultado Mensal":
+    st.subheader("📈 Fechamento e Resultado Mensal")
+    
+    meses_sem_todos = [m for m in st.session_state.lista_meses if m != "Todos"]
+    mes_foco = st.selectbox("Selecione o Mês para Análise", meses_sem_todos)
+    
+    if len(st.session_state.vendas) > 0:
+        df_v = pd.DataFrame(st.session_state.vendas)
+        if "Data" in df_v.columns:
+            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
+            df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
+            
+            df_mes = df_v[df_v["Ano_Mes"] == mes_foco]
+            
+            if not df_mes.empty:
+                tot_faturamento = float(df_mes["Total"].astype(float).sum())
+                tot_fiado = float(df_mes["Pendente"].astype(float).sum())
+                tot_pago = tot_faturamento - tot_fiado
+                qtd_pedidos = len(df_mes)
+                
+                st.markdown(f"""
+                    <div class="metric-card"><div class="metric-title">Faturamento Total ({mes_foco})</div><div class="metric-value">R$ {tot_faturamento:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Valor Já Recebido</div><div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_pago:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Fiado Pendente</div><div class="metric-value" style="color:#B71C1C !important;">R$ {tot_fiado:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Total de Pedidos</div><div class="metric-value">{qtd_pedidos}</div></div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.write(f"### Pedidos do Mês de {mes_foco}")
+                cols = [c for c in ["ID", "Data", "Cliente", "Doces", "Total", "Pendente", "Status"] if c in df_mes.columns]
+                st.dataframe(df_mes[cols], use_container_width=True, hide_index=True)
+            else:
+                st.info(f"Nenhuma venda registrada no mês de {mes_foco}.")
+        else:
+            st.info("Nenhuma venda registrada ainda.")
+    else:
+        st.info("Nenhuma venda registrada ainda.")
+
+# 5. RESULTADO ANUAL
+elif pagina == "📅 Resultado Anual":
+    st.subheader("📅 Fechamento e Balanço Anual")
+    
+    anos_disponiveis = ["2026", "2027", "2028"]
+    ano_foco = st.selectbox("Selecione o Ano para Análise", anos_disponiveis)
+    
+    if len(st.session_state.vendas) > 0:
+        df_v = pd.DataFrame(st.session_state.vendas)
+        if "Data" in df_v.columns:
+            df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
+            df_v["Ano"] = df_v["Data_DT"].dt.strftime("%Y")
+            
+            df_ano = df_v[df_v["Ano"] == ano_foco]
+            
+            if not df_ano.empty:
+                tot_ano_vendas = float(df_ano["Total"].astype(float).sum())
+                tot_ano_fiado = float(df_ano["Pendente"].astype(float).sum())
+                tot_ano_pago = tot_ano_vendas - tot_ano_fiado
+                qtd_ano_pedidos = len(df_ano)
+                
+                st.markdown(f"""
+                    <div class="metric-card"><div class="metric-title">Faturamento Anual ({ano_foco})</div><div class="metric-value">R$ {tot_ano_vendas:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Total Recebido no Ano</div><div class="metric-value" style="color:#1B5E20 !important;">R$ {tot_ano_pago:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Total em Fiado no Ano</div><div class="metric-value" style="color:#B71C1C !important;">R$ {tot_ano_fiado:,.2f}</div></div>
+                    <div class="metric-card"><div class="metric-title">Total de Pedidos no Ano</div><div class="metric-value">{qtd_ano_pedidos}</div></div>
+                """, unsafe_allow_html=True)
+            else:
+                st.info(f"Nenhuma venda registrada no ano de {ano_foco}.")
+        else:
+            st.info("Nenhuma venda registrada ainda.")
+    else:
+        st.info("Nenhuma venda registrada ainda.")
+
+# 6. GERENCIAR CARDÁPIO
+elif pagina == "🍬 Gerenciar Cardápio":
+    st.subheader("🍬 Cardápio e Preços Cadastrados")
+    st.write("Altere os preços diretamente ou clique na lixeira 🗑️ para remover um doce.")
+
+    ws_cardapio = get_worksheet("Cardápio")
+    doces_para_remover = []
+    
+    for doce, preco_atual in list(st.session_state.cardapio.items()):
+        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+        with c1:
+            st.markdown(f"**{doce}**")
+        with c2:
+            novo_p = st.number_input(
+                f"Preço (R$)", 
+                min_value=0.0, 
+                value=float(preco_atual), 
+                step=0.50, 
+                key=f"p_{doce}"
+            )
+        with c3:
+            if st.button("💾 Salvar", key=f"save_{doce}"):
+                st.session_state.cardapio[doce] = novo_p
+                if ws_cardapio:
+                    try:
+                        records = ws_cardapio.get_all_records()
+                        for idx, row in enumerate(records, start=2):
+                            d_row = str(row.get("Doces", row.get("Doce", ""))).strip()
+                            if d_row == doce:
+                                ws_cardapio.update_cell(idx, 2, novo_p)
+                                break
+                    except Exception:
+                        pass
+                st.success(f"Preço do {doce} atualizado!")
+                st.rerun()
+        with c4:
+            if st.button("🗑️", key=f"del_cardapio_{doce}"):
+                doces_para_remover.append(doce)
+
+    if doces_para_remover:
+        for d in doces_para_remover:
+            del st.session_state.cardapio[d]
+            if ws_cardapio:
+                try:
+                    records = ws_cardapio.get_all_records()
+                    for idx, row in enumerate(records, start=2):
+                        d_row = str(row.get("Doces", row.get("Doce", ""))).strip()
+                        if d_row == d:
+                            ws_cardapio.delete_rows(idx)
+                            break
+                except Exception:
+                    pass
+        st.success("Doce removido!")
+        st.rerun()
+
+    st.markdown("---")
+    st.subheader("➕ Cadastrar Novo Doce")
+    c_nome, c_pr = st.columns([2, 1])
+    with c_nome:
+        nome_novo = st.text_input("Nome do Doce")
+    with c_pr:
+        preco_novo = st.number_input("Preço Inicial (R$)", min_value=0.0, value=10.0, step=0.50)
+
+    if st.button("✨ Adicionar ao Cardápio", use_container_width=True):
+        if nome_novo.strip():
+            d_limpo = nome_novo.strip()
+            st.session_state.cardapio[d_limpo] = preco_novo
+            if ws_cardapio:
+                try:
+                    ws_cardapio.append_row([d_limpo, preco_novo])
+                except Exception:
+                    pass
+            st.success(f"'{d_limpo}' cadastrado com sucesso!")
+            st.rerun()
+
+# 7. CLIENTES
+elif pagina == "👥 Clientes":
+    st.subheader("👥 Clientes")
+    novo_c = st.text_input("Novo Cliente")
+    if st.button("Adicionar") and novo_c:
+        c_nome = novo_c.strip()
+        if c_nome not in st.session_state.clientes:
+            st.session_state.clientes.append(c_nome)
+            ws = get_worksheet("Clientes")
+            if ws:
+                ws.append_row([c_nome])
+            st.success("Cliente adicionado!")
+            st.rerun()
+    for c in st.session_state.clientes:
+        st.write(f"• {c}")
