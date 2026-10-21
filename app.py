@@ -187,11 +187,12 @@ pagina = st.sidebar.radio("Navegar", [
     "➕ Registrar Venda", 
     "💰 Cobranças (Fiado)", 
     "📈 Resultado Mensal",
+    "📅 Resultado Anual",
     "🍬 Gerenciar Cardápio", 
     "👥 Clientes"
 ])
 
-# 1. VISÃO GERAL (ADAPTADA E RESPONSIVA PARA CELULAR)
+# 1. VISÃO GERAL
 if pagina == "📊 Visão Geral":
     st.subheader("📊 Controle Geral de Vendas")
     mes_sel = st.selectbox("📅 Selecione o Mês", st.session_state.lista_meses)
@@ -353,93 +354,29 @@ elif pagina == "➕ Registrar Venda":
                 st.session_state.carrinho = []
                 st.rerun()
 
-# 3. CLIENTES
-elif pagina == "👥 Clientes":
-    st.subheader("👥 Clientes")
-    novo_c = st.text_input("Novo Cliente")
-    if st.button("Adicionar") and novo_c:
-        c_nome = novo_c.strip()
-        if c_nome not in st.session_state.clientes:
-            st.session_state.clientes.append(c_nome)
-            ws = get_worksheet("Clientes")
-            if ws:
-                ws.append_row([c_nome])
-            st.success("Cliente adicionado!")
-            st.rerun()
-    for c in st.session_state.clientes:
-        st.write(f"• {c}")
-
-# 4. GERENCIAR CARDÁPIO
-elif pagina == "🍬 Gerenciar Cardápio":
-    st.subheader("🍬 Cardápio e Preços Cadastrados")
-    st.write("Altere os preços diretamente ou clique na lixeira 🗑️ para remover um doce.")
-
-    ws_cardapio = get_worksheet("Cardápio")
-    doces_para_remover = []
+# 3. COBRANÇAS / FIADO
+elif pagina == "💰 Cobranças (Fiado)":
+    st.subheader("💰 Clientes com Fiado Pendente")
     
-    for doce, preco_atual in list(st.session_state.cardapio.items()):
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-        with c1:
-            st.markdown(f"**{doce}**")
-        with c2:
-            novo_p = st.number_input(
-                f"Preço (R$)", 
-                min_value=0.0, 
-                value=float(preco_atual), 
-                step=0.50, 
-                key=f"p_{doce}"
-            )
-        with c3:
-            if st.button("💾 Salvar", key=f"save_{doce}"):
-                st.session_state.cardapio[doce] = novo_p
-                if ws_cardapio:
-                    try:
-                        records = ws_cardapio.get_all_records()
-                        for idx, row in enumerate(records, start=2):
-                            d_row = str(row.get("Doces", row.get("Doce", ""))).strip()
-                            if d_row == doce:
-                                ws_cardapio.update_cell(idx, 2, novo_p)
-                                break
-                    except Exception:
-                        pass
-                st.success(f"Preço do {doce} atualizado!")
-                st.rerun()
-        with c4:
-            if st.button("🗑️", key=f"del_cardapio_{doce}"):
-                doces_para_remover.append(doce)
-
-    if doces_para_remover:
-        for d in doces_para_remover:
-            del st.session_state.cardapio[d]
-            if ws_cardapio:
-                try:
-                    records = ws_cardapio.get_all_records()
-                    for idx, row in enumerate(records, start=2):
-                        d_row = str(row.get("Doces", row.get("Doce", ""))).strip()
-                        if d_row == d:
-                            ws_cardapio.delete_rows(idx)
-                            break
-                except Exception:
-                    pass
-        st.success("Doce removido!")
-        st.rerun()
-
-    st.markdown("---")
-    st.subheader("➕ Cadastrar Novo Doce")
-    c_nome, c_pr = st.columns([2, 1])
-    with c_nome:
-        nome_novo = st.text_input("Nome do Doce")
-    with c_pr:
-        preco_novo = st.number_input("Preço Inicial (R$)", min_value=0.0, value=10.0, step=0.50)
-
-    if st.button("✨ Adicionar ao Cardápio", use_container_width=True):
-        if nome_novo.strip():
-            d_limpo = nome_novo.strip()
-            st.session_state.cardapio[d_limpo] = preco_novo
-            if ws_cardapio:
-                try:
-                    ws_cardapio.append_row([d_limpo, preco_novo])
-                except Exception:
-                    pass
-            st.success(f"'{d_limpo}' cadastrado com sucesso!")
-            st.rerun()
+    pendentes = [v for v in st.session_state.vendas if float(v.get("Pendente", 0)) > 0]
+    
+    if len(pendentes) == 0:
+        st.success("🎉 Nenhum valor pendente de cobrança!")
+    else:
+        ws_vendas = get_worksheet("Vendas")
+        for v in pendentes:
+            v_id = v.get("ID")
+            v_cli = v.get("Cliente", "")
+            v_dat = v.get("Data", "")
+            v_doc = v.get("Doces", "")
+            v_tot = float(v.get("Total", 0))
+            v_pend = float(v.get("Pendente", 0))
+            
+            st.markdown(f"""
+                <div class="card-venda" style="border-left: 5px solid #B71C1C;">
+                    <b>👤 {v_cli}</b><br>
+                    <small>📅 {v_dat} | 🍬 {v_doc}</small><br>
+                    <b>Total Pedido: R$ {v_tot:.2f}</b><br>
+                    <h4 style="color:#B71C1C !important; margin: 4px 0;">Falta Pagar: R$ {v_pend:.2f}</h4>
+                </div>
+            """, unsafe_allow
