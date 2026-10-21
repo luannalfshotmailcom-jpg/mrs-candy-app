@@ -77,12 +77,21 @@ st.markdown("""
         font-size: 26px;
         font-weight: bold;
     }
-    .venda-card {
+    .table-header {
+        background-color: #DFCDA8;
+        font-weight: bold;
+        padding: 8px;
+        border-radius: 4px;
+        margin-bottom: 8px;
+    }
+    .table-row {
         background-color: #F8F3E6;
-        border: 1px solid #C5A86D;
-        border-radius: 10px;
-        padding: 12px 15px;
-        margin-bottom: 10px;
+        padding: 8px;
+        border-bottom: 1px solid #C5A86D;
+        margin-bottom: 4px;
+        border-radius: 4px;
+        display: flex;
+        align-items: center;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -148,7 +157,7 @@ def load_clientes():
                 if c:
                     cli_list.append(str(c).strip())
             if cli_list:
-                return cli_list
+                return sorted(list(set(cli_list)))
         except Exception:
             pass
     return ["Luanna", "Carlos", "Cliente Avulso"]
@@ -191,7 +200,7 @@ pagina = st.sidebar.radio("Navegar", [
     "👥 Clientes"
 ])
 
-# 1. VISÃO GERAL (COM EXCLUSÃO FÁCIL DE VENDAS)
+# 1. VISÃO GERAL
 if pagina == "📊 Visão Geral":
     st.subheader("📊 Controle Geral de Vendas")
     mes_sel = st.selectbox("📅 Selecione o Mês", st.session_state.lista_meses)
@@ -228,41 +237,47 @@ if pagina == "📊 Visão Geral":
     st.subheader("📋 Histórico de Vendas Registradas")
 
     if vendas_filtradas:
+        # Cabeçalho da Tabela
+        col_d, col_c, col_doc, col_t, col_p, col_s, col_act = st.columns([1.5, 2, 2.5, 1.2, 1.2, 1.2, 0.8])
+        col_d.write("**Data**")
+        col_c.write("**Cliente**")
+        col_doc.write("**Doces**")
+        col_t.write("**Total**")
+        col_p.write("**Pendente**")
+        col_s.write("**Status**")
+        col_act.write("**Ação**")
+
+        st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
+
         for v in vendas_filtradas:
             v_id = v.get("ID")
-            v_data = v.get("Data", "")
-            v_cli = v.get("Cliente", "")
-            v_doces = v.get("Doces", "")
+            v_data = str(v.get("Data", ""))
+            v_cli = str(v.get("Cliente", ""))
+            v_doces = str(v.get("Doces", ""))
             v_tot = float(v.get("Total", 0))
             v_pend = float(v.get("Pendente", 0))
-            v_status = v.get("Status", "Pago")
+            v_status = str(v.get("Status", "Pago"))
 
-            c_info, c_del = st.columns([5, 1])
-            with c_info:
-                st.markdown(f"""
-                    <div class="venda-card">
-                        <b>Data:</b> {v_data} | <b>Cliente:</b> {v_cli}<br>
-                        <b>Itens:</b> {v_doces}<br>
-                        <b>Total:</b> R$ {v_tot:.2f} | <b>Status:</b> {v_status} (Pendente: R$ {v_pend:.2f})
-                    </div>
-                """, unsafe_allow_html=True)
-            with c_del:
-                if st.button("🗑️", key=f"del_venda_{v_id}"):
-                    # Remover do session_state
-                    st.session_state.vendas = [x for x in st.session_state.vendas if str(x.get("ID")) != str(v_id)]
-                    
-                    # Remover da Planilha do Google Drive
-                    if ws_vendas:
-                        try:
-                            records = ws_vendas.get_all_records()
-                            for idx, row in enumerate(records, start=2):
-                                if str(row.get("ID")) == str(v_id):
-                                    ws_vendas.delete_rows(idx)
-                                    break
-                        except Exception:
-                            pass
-                    st.success("Venda excluída da planilha com sucesso!")
-                    st.rerun()
+            c_d, c_c, c_doc, c_t, c_p, c_s, c_act = st.columns([1.5, 2, 2.5, 1.2, 1.2, 1.2, 0.8])
+            c_d.write(v_data)
+            c_c.write(v_cli)
+            c_doc.write(v_doces)
+            c_t.write(f"R$ {v_tot:.2f}")
+            c_p.write(f"R$ {v_pend:.2f}")
+            c_s.write(v_status)
+            if c_act.button("🗑️", key=f"del_venda_{v_id}"):
+                st.session_state.vendas = [x for x in st.session_state.vendas if str(x.get("ID")) != str(v_id)]
+                if ws_vendas:
+                    try:
+                        records = ws_vendas.get_all_records()
+                        for idx, row in enumerate(records, start=2):
+                            if str(row.get("ID")) == str(v_id):
+                                ws_vendas.delete_rows(idx)
+                                break
+                    except Exception:
+                        pass
+                st.success("Venda excluída com sucesso!")
+                st.rerun()
     else:
         st.info("Nenhuma venda registrada no período selecionado.")
 
@@ -272,7 +287,11 @@ elif pagina == "➕ Registrar Venda":
     
     c_cli, c_dat = st.columns([2, 1])
     with c_cli:
-        cliente_sel = st.selectbox("Cliente (Selecione ou Digite)", st.session_state.clientes)
+        cliente_input = st.selectbox(
+            "Cliente (Escolha da lista ou digite para filtrar/criar)", 
+            options=[""] + st.session_state.clientes,
+            accept_new_options=True
+        )
     with c_dat:
         data_venda = st.date_input("Data", date.today())
 
@@ -307,43 +326,60 @@ elif pagina == "➕ Registrar Venda":
         v_pend = max(0.0, tot_ped - v_pago)
 
         if st.button("✅ Confirmar e Salvar Venda", type="primary", use_container_width=True):
-            itens_str = ", ".join([f"{i['Qtd']}x {i['Doce']}" for i in st.session_state.carrinho])
-            nova_venda = {
-                "ID": len(st.session_state.vendas) + 1,
-                "Data": data_venda.strftime("%d/%m/%Y"),
-                "Cliente": cliente_sel,
-                "Doces": itens_str,
-                "Total": float(tot_ped),
-                "Pendente": float(v_pend),
-                "Status": "Pago" if v_pend == 0 else "Pendente"
-            }
-            
-            ws = get_worksheet("Vendas")
-            if ws:
-                try:
-                    ws.append_row([
-                        nova_venda["ID"], nova_venda["Data"], nova_venda["Cliente"],
-                        nova_venda["Doces"], nova_venda["Total"], nova_venda["Pendente"], nova_venda["Status"]
-                    ])
-                    st.success("Salvo na Planilha!")
-                except Exception as e:
-                    st.error(f"Erro na gravação: {e}")
+            if not cliente_input or not str(cliente_input).strip():
+                st.error("Por favor, informe o nome do cliente.")
+            else:
+                cli_final = str(cliente_input).strip()
+                
+                # Se for cliente novo, cadastra na lista e na planilha
+                if cli_final not in st.session_state.clientes:
+                    st.session_state.clientes.append(cli_final)
+                    ws_c = get_worksheet("Clientes")
+                    if ws_c:
+                        try:
+                            ws_c.append_row([cli_final])
+                        except Exception:
+                            pass
 
-            st.session_state.vendas.append(nova_venda)
-            st.session_state.carrinho = []
-            st.rerun()
+                itens_str = ", ".join([f"{i['Qtd']}x {i['Doce']}" for i in st.session_state.carrinho])
+                nova_venda = {
+                    "ID": len(st.session_state.vendas) + 1,
+                    "Data": data_venda.strftime("%d/%m/%Y"),
+                    "Cliente": cli_final,
+                    "Doces": itens_str,
+                    "Total": float(tot_ped),
+                    "Pendente": float(v_pend),
+                    "Status": "Pago" if v_pend == 0 else "Pendente"
+                }
+                
+                ws = get_worksheet("Vendas")
+                if ws:
+                    try:
+                        ws.append_row([
+                            nova_venda["ID"], nova_venda["Data"], nova_venda["Cliente"],
+                            nova_venda["Doces"], nova_venda["Total"], nova_venda["Pendente"], nova_venda["Status"]
+                        ])
+                        st.success("Salvo na Planilha!")
+                    except Exception as e:
+                        st.error(f"Erro na gravação: {e}")
+
+                st.session_state.vendas.append(nova_venda)
+                st.session_state.carrinho = []
+                st.rerun()
 
 # 3. CLIENTES
 elif pagina == "👥 Clientes":
     st.subheader("👥 Clientes")
     novo_c = st.text_input("Novo Cliente")
     if st.button("Adicionar") and novo_c:
-        st.session_state.clientes.append(novo_c.strip())
-        ws = get_worksheet("Clientes")
-        if ws:
-            ws.append_row([novo_c.strip()])
-        st.success("Cliente adicionado!")
-        st.rerun()
+        c_nome = novo_c.strip()
+        if c_nome not in st.session_state.clientes:
+            st.session_state.clientes.append(c_nome)
+            ws = get_worksheet("Clientes")
+            if ws:
+                ws.append_row([c_nome])
+            st.success("Cliente adicionado!")
+            st.rerun()
     for c in st.session_state.clientes:
         st.write(f"• {c}")
 
@@ -353,7 +389,6 @@ elif pagina == "🍬 Gerenciar Cardápio":
     st.write("Altere os preços diretamente ou clique na lixeira 🗑️ para remover um doce.")
 
     ws_cardapio = get_worksheet("Cardápio")
-
     doces_para_remover = []
     
     for doce, preco_atual in list(st.session_state.cardapio.items()):
