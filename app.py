@@ -214,8 +214,8 @@ if pagina == "📊 Visão Geral":
                 v_copia["_idx_orig"] = idx_v
                 vendas_filtradas.append(v_copia)
 
-        tot = sum(float(v.get("Total", 0)) for v in vendas_filtradas)
-        pend = sum(float(v.get("Pendente", 0)) for v in vendas_filtradas)
+        tot = sum(float(str(v.get("Total", 0)).replace(",", ".")) for v in vendas_filtradas)
+        pend = sum(float(str(v.get("Pendente", 0)).replace(",", ".")) for v in vendas_filtradas)
         rec = tot - pend
     else:
         vendas_filtradas = []
@@ -237,8 +237,8 @@ if pagina == "📊 Visão Geral":
             v_data = str(item.get("Data", ""))
             v_cli = str(item.get("Cliente", ""))
             v_doces = str(item.get("Doces", ""))
-            v_tot = float(item.get("Total", 0))
-            v_pend = float(item.get("Pendente", 0))
+            v_tot = float(str(item.get("Total", 0)).replace(",", "."))
+            v_pend = float(str(item.get("Pendente", 0)).replace(",", "."))
             v_status = str(item.get("Status", "Pago"))
 
             with st.container():
@@ -329,8 +329,10 @@ elif pagina == "➕ Registrar Venda":
                             pass
 
                 itens_str = ", ".join([f"{i['Qtd']}x {i['Doce']}" for i in st.session_state.carrinho])
+                proximo_id = len(st.session_state.vendas) + 1
+                
                 nova_venda = {
-                    "ID": len(st.session_state.vendas) + 1,
+                    "ID": proximo_id,
                     "Data": data_venda.strftime("%d/%m/%Y"),
                     "Cliente": cli_final,
                     "Doces": itens_str,
@@ -354,23 +356,31 @@ elif pagina == "➕ Registrar Venda":
                 st.session_state.carrinho = []
                 st.rerun()
 
-# 3. COBRANÇAS / FIADO
+# 3. COBRANÇAS / FIADO (COM QUITAR TUDO E PAGAMENTO PARCIAL)
 elif pagina == "💰 Cobranças (Fiado)":
     st.subheader("💰 Clientes com Fiado Pendente")
     
-    pendentes = [v for v in st.session_state.vendas if float(v.get("Pendente", 0)) > 0]
+    pendentes_com_idx = []
+    for idx, v in enumerate(st.session_state.vendas):
+        val_pend = float(str(v.get("Pendente", 0)).replace(",", "."))
+        if val_pend > 0:
+            v_copy = dict(v)
+            v_copy["_idx_orig"] = idx
+            v_copy["_pend_num"] = val_pend
+            pendentes_com_idx.append(v_copy)
     
-    if len(pendentes) == 0:
+    if len(pendentes_com_idx) == 0:
         st.success("🎉 Nenhum valor pendente de cobrança!")
     else:
         ws_vendas = get_worksheet("Vendas")
-        for v in pendentes:
-            v_id = v.get("ID")
-            v_cli = v.get("Cliente", "")
-            v_dat = v.get("Data", "")
-            v_doc = v.get("Doces", "")
-            v_tot = float(v.get("Total", 0))
-            v_pend = float(v.get("Pendente", 0))
+        for item in pendentes_com_idx:
+            v_id = item.get("ID")
+            idx_o = item.get("_idx_orig")
+            v_cli = item.get("Cliente", "")
+            v_dat = item.get("Data", "")
+            v_doc = item.get("Doces", "")
+            v_tot = float(str(item.get("Total", 0)).replace(",", "."))
+            v_pend = item.get("_pend_num")
             
             st.markdown(f"""
                 <div class="card-venda" style="border-left: 5px solid #B71C1C;">
@@ -381,21 +391,50 @@ elif pagina == "💰 Cobranças (Fiado)":
                 </div>
             """, unsafe_allow_html=True)
             
-            if st.button("✅ Quitar Tudo", key=f"quitar_{v_id}"):
-                v["Pendente"] = 0.0
-                v["Status"] = "Pago"
-                if ws_vendas:
-                    try:
-                        records = ws_vendas.get_all_records()
-                        for idx, row in enumerate(records, start=2):
-                            if str(row.get("ID")) == str(v_id):
-                                ws_vendas.update_cell(idx, 6, 0.0)
-                                ws_vendas.update_cell(idx, 7, "Pago")
-                                break
-                    except Exception:
-                        pass
-                st.success("Dívida quitada!")
-                st.rerun()
+            col_q, col_p = st.columns(2)
+            
+            # Opção 1: Quitar Tudo
+            with col_q:
+                if st.button("✅ Quitar Tudo", key=f"quitar_full_{v_id}_{idx_o}"):
+                    st.session_state.vendas[idx_o]["Pendente"] = 0.0
+                    st.session_state.vendas[idx_o]["Status"] = "Pago"
+                    if ws_vendas:
+                        try:
+                            ws_vendas.update_cell(idx_o + 2, 6, 0.0)
+                            ws_vendas.update_cell(idx_o + 2, 7, "Pago")
+                        except Exception:
+                            pass
+                    st.success(f"Dívida de {v_cli} quitada integralmente!")
+                    st.rerun()
+            
+            # Opção 2: Pagamento Parcial (Abatimento)
+            with col_p:
+                val_abater = st.number_input(
+                    "Valor a abater (R$)", 
+                    min_value=0.0, 
+                    max_value=float(v_pend), 
+                    value=0.0, 
+                    step=0.50, 
+                    key=f"input_abater_{v_id}_{idx_o}"
+                )
+                if st.button("💵 Abater Valor", key=f"btn_abater_{v_id}_{idx_o}"):
+                    if val_abater > 0:
+                        novo_saldo = max(0.0, v_pend - val_abater)
+                        novo_status = "Pago" if novo_saldo == 0 else "Pendente"
+                        
+                        st.session_state.vendas[idx_o]["Pendente"] = novo_saldo
+                        st.session_state.vendas[idx_o]["Status"] = novo_status
+                        
+                        if ws_vendas:
+                            try:
+                                ws_vendas.update_cell(idx_o + 2, 6, novo_saldo)
+                                ws_vendas.update_cell(idx_o + 2, 7, novo_status)
+                            except Exception:
+                                pass
+                        st.success(f"Abatido R$ {val_abater:.2f}! Novo saldo: R$ {novo_saldo:.2f}")
+                        st.rerun()
+                    else:
+                        st.warning("Digite um valor maior que R$ 0 para abater.")
 
 # 4. RESULTADO MENSAL
 elif pagina == "📈 Resultado Mensal":
@@ -410,11 +449,14 @@ elif pagina == "📈 Resultado Mensal":
             df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
             df_v["Ano_Mes"] = df_v["Data_DT"].dt.strftime("%m/%Y")
             
-            df_mes = df_v[df_v["Ano_Mes"] == mes_foco]
+            df_mes = df_v[df_v["Ano_Mes"] == mes_foco].copy()
             
             if not df_mes.empty:
-                tot_faturamento = float(df_mes["Total"].astype(float).sum())
-                tot_fiado = float(df_mes["Pendente"].astype(float).sum())
+                df_mes["Total_Num"] = df_mes["Total"].astype(str).str.replace(",", ".").astype(float)
+                df_mes["Pend_Num"] = df_mes["Pendente"].astype(str).str.replace(",", ".").astype(float)
+                
+                tot_faturamento = float(df_mes["Total_Num"].sum())
+                tot_fiado = float(df_mes["Pend_Num"].sum())
                 tot_pago = tot_faturamento - tot_fiado
                 qtd_pedidos = len(df_mes)
                 
@@ -449,11 +491,14 @@ elif pagina == "📅 Resultado Anual":
             df_v["Data_DT"] = pd.to_datetime(df_v["Data"], format="%d/%m/%Y", errors="coerce")
             df_v["Ano"] = df_v["Data_DT"].dt.strftime("%Y")
             
-            df_ano = df_v[df_v["Ano"] == ano_foco]
+            df_ano = df_v[df_v["Ano"] == ano_foco].copy()
             
             if not df_ano.empty:
-                tot_ano_vendas = float(df_ano["Total"].astype(float).sum())
-                tot_ano_fiado = float(df_ano["Pendente"].astype(float).sum())
+                df_ano["Total_Num"] = df_ano["Total"].astype(str).str.replace(",", ".").astype(float)
+                df_ano["Pend_Num"] = df_ano["Pendente"].astype(str).str.replace(",", ".").astype(float)
+                
+                tot_ano_vendas = float(df_ano["Total_Num"].sum())
+                tot_ano_fiado = float(df_ano["Pend_Num"].sum())
                 tot_ano_pago = tot_ano_vendas - tot_ano_fiado
                 qtd_ano_pedidos = len(df_ano)
                 
