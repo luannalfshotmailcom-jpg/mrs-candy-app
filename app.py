@@ -10,7 +10,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Estilo CSS bege/creme claro
+# Estilo CSS bege/creme claro e responsivo
 st.markdown("""
     <style>
     .stApp {
@@ -77,21 +77,12 @@ st.markdown("""
         font-size: 26px;
         font-weight: bold;
     }
-    .table-header {
-        background-color: #DFCDA8;
-        font-weight: bold;
-        padding: 8px;
-        border-radius: 4px;
-        margin-bottom: 8px;
-    }
-    .table-row {
+    .card-venda {
         background-color: #F8F3E6;
-        padding: 8px;
-        border-bottom: 1px solid #C5A86D;
-        margin-bottom: 4px;
-        border-radius: 4px;
-        display: flex;
-        align-items: center;
+        border: 1px solid #C5A86D;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 10px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -200,7 +191,7 @@ pagina = st.sidebar.radio("Navegar", [
     "👥 Clientes"
 ])
 
-# 1. VISÃO GERAL
+# 1. VISÃO GERAL (ADAPTADA E RESPONSIVA PARA CELULAR)
 if pagina == "📊 Visão Geral":
     st.subheader("📊 Controle Geral de Vendas")
     mes_sel = st.selectbox("📅 Selecione o Mês", st.session_state.lista_meses)
@@ -209,7 +200,7 @@ if pagina == "📊 Visão Geral":
 
     if len(st.session_state.vendas) > 0:
         vendas_filtradas = []
-        for v in st.session_state.vendas:
+        for idx_v, v in enumerate(st.session_state.vendas):
             data_str = str(v.get("Data", ""))
             try:
                 dt_obj = pd.to_datetime(data_str, format="%d/%m/%Y", errors="coerce")
@@ -218,7 +209,9 @@ if pagina == "📊 Visão Geral":
                 ano_mes = "Outros"
                 
             if mes_sel == "Todos" or ano_mes == mes_sel:
-                vendas_filtradas.append(v)
+                v_copia = dict(v)
+                v_copia["_idx_orig"] = idx_v
+                vendas_filtradas.append(v_copia)
 
         tot = sum(float(v.get("Total", 0)) for v in vendas_filtradas)
         pend = sum(float(v.get("Pendente", 0)) for v in vendas_filtradas)
@@ -237,47 +230,41 @@ if pagina == "📊 Visão Geral":
     st.subheader("📋 Histórico de Vendas Registradas")
 
     if vendas_filtradas:
-        # Cabeçalho da Tabela
-        col_d, col_c, col_doc, col_t, col_p, col_s, col_act = st.columns([1.5, 2, 2.5, 1.2, 1.2, 1.2, 0.8])
-        col_d.write("**Data**")
-        col_c.write("**Cliente**")
-        col_doc.write("**Doces**")
-        col_t.write("**Total**")
-        col_p.write("**Pendente**")
-        col_s.write("**Status**")
-        col_act.write("**Ação**")
+        for item in vendas_filtradas:
+            v_id = item.get("ID")
+            idx_o = item.get("_idx_orig")
+            v_data = str(item.get("Data", ""))
+            v_cli = str(item.get("Cliente", ""))
+            v_doces = str(item.get("Doces", ""))
+            v_tot = float(item.get("Total", 0))
+            v_pend = float(item.get("Pendente", 0))
+            v_status = str(item.get("Status", "Pago"))
 
-        st.markdown("<hr style='margin:4px 0;'>", unsafe_allow_html=True)
-
-        for v in vendas_filtradas:
-            v_id = v.get("ID")
-            v_data = str(v.get("Data", ""))
-            v_cli = str(v.get("Cliente", ""))
-            v_doces = str(v.get("Doces", ""))
-            v_tot = float(v.get("Total", 0))
-            v_pend = float(v.get("Pendente", 0))
-            v_status = str(v.get("Status", "Pago"))
-
-            c_d, c_c, c_doc, c_t, c_p, c_s, c_act = st.columns([1.5, 2, 2.5, 1.2, 1.2, 1.2, 0.8])
-            c_d.write(v_data)
-            c_c.write(v_cli)
-            c_doc.write(v_doces)
-            c_t.write(f"R$ {v_tot:.2f}")
-            c_p.write(f"R$ {v_pend:.2f}")
-            c_s.write(v_status)
-            if c_act.button("🗑️", key=f"del_venda_{v_id}"):
-                st.session_state.vendas = [x for x in st.session_state.vendas if str(x.get("ID")) != str(v_id)]
-                if ws_vendas:
-                    try:
-                        records = ws_vendas.get_all_records()
-                        for idx, row in enumerate(records, start=2):
-                            if str(row.get("ID")) == str(v_id):
-                                ws_vendas.delete_rows(idx)
-                                break
-                    except Exception:
-                        pass
-                st.success("Venda excluída com sucesso!")
-                st.rerun()
+            with st.container():
+                col_info, col_btn = st.columns([4, 1])
+                with col_info:
+                    st.markdown(f"""
+                        <div class="card-venda">
+                            <span style="font-size:12px; color:#5C4328;">📅 {v_data}</span><br>
+                            <b>👤 {v_cli}</b><br>
+                            <small>🍬 {v_doces}</small><br>
+                            <b>Total: R$ {v_tot:.2f}</b> | <span style="color:{'#1B5E20' if v_pend == 0 else '#B71C1C'};">{v_status} (Pend: R$ {v_pend:.2f})</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                with col_btn:
+                    if st.button("🗑️", key=f"btn_del_v_{v_id}_{idx_o}"):
+                        st.session_state.vendas.pop(idx_o)
+                        if ws_vendas:
+                            try:
+                                records = ws_vendas.get_all_records()
+                                for idx, row in enumerate(records, start=2):
+                                    if str(row.get("ID")) == str(v_id):
+                                        ws_vendas.delete_rows(idx)
+                                        break
+                            except Exception:
+                                pass
+                        st.success("Venda excluída!")
+                        st.rerun()
     else:
         st.info("Nenhuma venda registrada no período selecionado.")
 
@@ -315,7 +302,7 @@ elif pagina == "➕ Registrar Venda":
             c1.write(f"**{item['Doce']}**")
             c2.write(f"x{item['Qtd']}")
             c3.write(f"R$ {item['Subtotal']:.2f}")
-            if c4.button("🗑️", key=f"del_item_{idx}"):
+            if c4.button("🗑️", key=f"del_cart_item_{idx}"):
                 st.session_state.carrinho.pop(idx)
                 st.rerun()
 
@@ -331,7 +318,6 @@ elif pagina == "➕ Registrar Venda":
             else:
                 cli_final = str(cliente_input).strip()
                 
-                # Se for cliente novo, cadastra na lista e na planilha
                 if cli_final not in st.session_state.clientes:
                     st.session_state.clientes.append(cli_final)
                     ws_c = get_worksheet("Clientes")
